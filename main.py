@@ -1,23 +1,30 @@
 # created on 1 Mar 2022
 from tkinter import *
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog,ttk
 import pandas as pd
-import os
-import glob
-import gc
-import warnings
+import os, glob, gc, warnings
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# connect to GSheet API
+scope = ['https://spreadsheets.google.com/feeds',
+		'https://www.googleapis.com/auth/drive']
+
+creds = ServiceAccountCredentials.from_json_keyfile_name('keys_drive.json', scope)
+gs = gspread.authorize(creds)
+sheet = gs.open('testAPI').sheet1
 
 root = Tk()
 root.geometry('800x600+1800+100')
-root.title('DEMO: My Withholding Tax')
+root.title('My Withholding Tax')
 root.resizable(True, True)
 warnings.simplefilter('ignore')
 
 class App_Inquiry:
 
 		def __init__(self, master):
-			
 			self.frame = Frame(master)
+			
 			self.dev = Label(self.frame, text='DEMO Version: Created by Natcha Phonkamhaeng  ', fg='grey')
 			self.journal_btn = Button(self.frame, text='  Import Cash Journal  ', command=self.browse_cash)
 			self.inq_btn = Button(self.frame, text='  Import Etax Inquiry  ', command=self.browse_inq)
@@ -177,15 +184,16 @@ class App_Inquiry:
 class App_WHT:
 
 	def __init__(self, master):
-		
 		self.frame = Frame(master)
 
 		self.menubar = Menu(self.frame)
 		self.filemenu = Menu(self.menubar, tearoff=0)
 		self.filemenu.add_command(label='Download Excel', command=self.download)
+		self.filemenu.add_command(label='Back to Main Menu', command=self.back )
 		self.filemenu.add_separator()
 		self.filemenu.add_command(label='Exit', command=root.quit)
 		self.menubar.add_cascade(label='File', menu=self.filemenu)
+
 		
 		self.y_scrollbar = Scrollbar(self.frame)
 		self.tree_view = ttk.Treeview(self.frame, height=20, selectmode='extended', yscrollcommand=self.y_scrollbar.set)
@@ -201,8 +209,16 @@ class App_WHT:
 		self.cal_btn = Button(self.frame, text=' Cal WHT  ', command=self.cal_wht)
 		self.cal_label = Label(self.frame, text='')
 
-		self.clear_btn = Button(self.frame, text=' Clear All ', command=self.clear, anchor=N)
-		self.back_btn = Button(self.frame, text=' Back ', command=self.back)
+		self.clear_btn = Button(self.frame, text=' Clear All ', command=self.clear, anchor=N, fg='red')
+
+		self.save_btn = Button(self.frame, text=' SAVE ',  bg='blue', fg='white', command=self.save,)
+
+		self.remark_entry = Entry(self.frame)
+		self.remark_label = Label(self.frame, text='Remark')
+		self.remark_btn = Button(self.frame, text=' Remark ', command=self.remark)		
+
+		self.adjust_label = Label(self.frame, text='Adjust')
+		self.adjust_entry = Entry(self.frame)
 
 	def download(self):
 		filetypes = [('excel', '*.xlsx')]
@@ -263,14 +279,14 @@ class App_WHT:
 
 		self.tax_label.pack(padx=10, pady=10, side=LEFT, anchor=N)
 		self.tax_entry.pack(side=LEFT, pady=10, anchor=N)
-		self.tax_btn.pack(side=LEFT, pady=10, padx=8, anchor=N)
+		self.tax_btn.pack(side=LEFT, pady=10, padx=8, anchor=N)				
 
 		self.clear_btn.pack(padx=10, pady=10, side=LEFT, anchor=N)
-		self.back_btn.pack(padx=10, pady=10, side=LEFT, anchor=N)
 
-		self.cal_btn.pack(padx=10, pady=10, side=RIGHT, anchor=N)
 		self.cal_label.pack(pady=10)
-
+		self.save_btn.pack(padx=10, pady=10, side=RIGHT, anchor=N)
+		self.remark_btn.pack(padx=10, pady=10, side=RIGHT, anchor=N)
+		self.cal_btn.pack(padx=10, pady=10, side=RIGHT, anchor=N)
 
 	def search_tax(self):
 		try:
@@ -357,6 +373,7 @@ class App_WHT:
 		self.tax_entry.delete(0, END)
 		self.cal_label.config(text='')
 		self.cal_label.pack(pady=10)
+		
 			
 	def clear_treeview(self):
 		self.tree_view.delete(*self.tree_view.get_children())
@@ -368,6 +385,73 @@ class App_WHT:
 		root.config(menu=emptyMenu)
 		main()
 
+	def save(self):
+		wht_list = []
+
+		for item in self.tree_view.selection():
+			item_text = self.tree_view.item(item, 'values')[4]
+			wht_list.append(item_text)
+
+		wht_list = list(map(float, wht_list))
+		sum_wht = sum(wht_list)
+
+		confirm = messagebox.askyesno(title='Save to Database', message=f'Total WHT: {sum_wht:,.2f}\n\n Are you sure to save to Database?')
+		if confirm:
+			try:
+				self.record()
+				messagebox.showinfo(title='Save to Database', message='Save Successful')
+			except Exception as e:
+				print(e)
+				messagebox.showerror(title='Error', message=e)
+
+	def remark(self):
+		# first let user input all remark
+		remark = simpledialog.askstring(title='Remark Reason', prompt='Input your remark')
+		if remark != None:
+			adjust = simpledialog.askfloat(title='Adjust', prompt='Amount to adjust\n\nIf no adjust, type 0.00')
+			if adjust != None:
+				confirm = messagebox.askyesno(title='Save to Database', message=f'Are you sure to save to Database?\n\nRemark : {remark}\nadjust : {adjust}')
+		# make pandas dataframe for those remark
+		list_remark = []
+		list_remark.append(remark)
+
+		list_adj = []
+		list_adj.append(adjust)
+
+		combine = list(zip(list_remark, list_adj))
+		df_rm = pd.DataFrame(combine)
+		df_rm.columns = df_rm.iloc[0]
+		df_rm.drop(index=0, inplace=True)	
+		# make pandas dataframe for selection in treeview
+		data_list = []
+		for item in self.tree_view.selection():
+			item_text = self.tree_view.item(item, 'values')		
+			data_list.append(item_text)
+
+		df = pd.DataFrame(data_list)
+		df.columns = df.iloc[0]
+		df.drop(index=0, inplace=True)
+		# combine two dataframe together using pd.concat
+		df_concat = pd.concat([df, df_rm], axis=1)
+		# send dataframe to API
+		try:
+			sheet.append_rows([df_concat.columns.values.tolist()] + df_concat.values.tolist(), value_input_option="USER_ENTERED")		
+		except Exception as e:
+			print(e)
+			messagebox.showerror(title='API Error', message='Please select one receipt for remark')
+							
+	def record(self):		
+		data_list = []
+		for item in self.tree_view.selection():
+			item_text = self.tree_view.item(item, 'values')		
+			data_list.append(item_text)
+
+		df = pd.DataFrame(data_list)
+		df.columns = df.iloc[0]
+		df.drop(index=0, inplace=True)
+		
+		sheet.append_rows([df.columns.values.tolist()] + df.values.tolist() , value_input_option="USER_ENTERED")
+		
 def main():		
 	app_inquiry.draw()
 
