@@ -22,163 +22,163 @@ warnings.simplefilter('ignore')
 
 class App_Inquiry:
 
-		def __init__(self, master):
-			self.frame = Frame(master)
-			
-			self.dev = Label(self.frame, text='DEMO Version: Created by Natcha Phonkamhaeng  ', fg='grey')
-			self.journal_btn = Button(self.frame, text='  Import Cash Journal  ', command=self.browse_cash)
-			self.inq_btn = Button(self.frame, text='  Import Etax Inquiry  ', command=self.browse_inq)
-			self.merge_btn = Button(self.frame, text = 'Merge Journal & Inquiry', state=DISABLED, command=self.merge_data)
-			self.clear_btn = Button(self.frame, text=' CLEAR ALL DATA', command=self.clear, fg='red')
-			
-			self.listbox_journal = Listbox(self.frame, selectmode=MULTIPLE, bd=1, height=25, width=30)
-			self.listbox_inq = Listbox(self.frame, selectmode=MULTIPLE, bd=1, height=25, width=30)
+	def __init__(self, master):
+		self.frame = Frame(master)
+		
+		self.dev = Label(self.frame, text='DEMO Version: Created by Natcha Phonkamhaeng  ', fg='grey')
+		self.journal_btn = Button(self.frame, text='  Import Cash Journal  ', command=self.browse_cash)
+		self.inq_btn = Button(self.frame, text='  Import Etax Inquiry  ', command=self.browse_inq)
+		self.merge_btn = Button(self.frame, text = 'Merge Journal & Inquiry', state=DISABLED, command=self.merge_data)
+		self.clear_btn = Button(self.frame, text=' CLEAR ALL DATA', command=self.clear, fg='red')
+		
+		self.listbox_journal = Listbox(self.frame, selectmode=MULTIPLE, bd=1, height=25, width=30)
+		self.listbox_inq = Listbox(self.frame, selectmode=MULTIPLE, bd=1, height=25, width=30)
 
+		self.var_cash_btn = False
+		self.var_inq_btn = False
+
+	def browse_cash(self):			
+		filetypes = [('Excel files', '.xlsx')]
+		self.cash_path = filedialog.askopenfilenames(title='Choose files', filetypes=filetypes)
+
+		self.df_cash = pd.DataFrame()
+
+		for i in self.cash_path:
+			self.cash_dir, self.cash_basename = os.path.split(i)
+			self.listbox_journal.insert(END, self.cash_basename)
+			# ETL by using Pandas
+			for f in glob.glob(i):
+				try:
+					csh_chq = pd.read_excel(f, sheet_name='Report WHT Cash & CHQ')
+					tfr = pd.read_excel(f, sheet_name='WHT TRF (HSBC&BAY)')
+					e_payment = pd.read_excel(f, sheet_name='WHT TRF (e-payment)')
+					df_concat = pd.concat([csh_chq, tfr, e_payment], ignore_index=True)
+					self.df_cash = pd.concat([self.df_cash, df_concat], ignore_index=True)
+				except ValueError as e:
+					print(f'ValueError: file is not cash journal: {e}')
+					messagebox.showerror('Error', f'File is not Cash Journal\n{e}')
+					if 'ok':
+						self.listbox_journal.delete(0,END)			
+		try:
+			# dropna on columns WHT
+			self.df_cash.dropna(subset=['Unnamed: 10'], inplace=True)			
+			# delete unnesscesary columns
+			self.df_cash = self.df_cash.drop(self.df_cash.columns[12:], axis=1)
+			# make row 1 to be header
+			self.df_cash.columns = self.df_cash.iloc[0]
+			self.df_cash = self.df_cash[1:]
+			# delete unwanted row
+			filt = (self.df_cash['Receipt Date'] == 'Receipt Date')
+			self.df_cash = self.df_cash.drop(index=self.df_cash[filt].index)
+			self.df_cash['Receipt Date'] = pd.to_datetime(self.df_cash['Receipt Date'], format='%Y-%m-%d')
+			self.df_cash['Receipt\nApply AMT'] = self.df_cash['Receipt\nApply AMT'].astype(float)
+			# df.to_excel('test.xlsx', index=False)
+		except KeyError as e:
+			print(f'KeyError: user did not select any file: {e}')
+		except ValueError as e:
+			print(f'ValueError: file is not cash journal: {e}')
+			messagebox.showerror('Error', 'File is not Cash Journal')
+		except Exception as e:
+			print(f'Exception: error: {e}')
+
+		# if listbox cash journal is not emtry (have data), browse button will be disable.
+		if self.listbox_journal.get(0, END) != ():
+			self.journal_btn['state'] = 'disabled'
+			self.var_cash_btn = True
+			self.switch()
+											
+	def browse_inq(self):
+		filetypes = [('Excel files', '.xlsx')]
+		
+		self.inq_path = filedialog.askopenfilenames(title='Choose files', filetypes=filetypes)
+
+		self.df_inq = pd.DataFrame()
+
+		for i in self.inq_path:
+			self.inq_dir, self.inq_basename = os.path.split(i)
+			self.listbox_inq.insert(END, self.inq_basename)
+			for f in glob.glob(i):
+				read_inq = pd.read_excel(f, engine='openpyxl')
+				self.df_inq = pd.concat([self.df_inq, read_inq], ignore_index=True)
+		try:
+			pd.set_option('display.float_format', '{:.0f}'.format)
+			self.df_inq = self.df_inq[['docId', 'taxIDBR']]			
+			self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].apply(lambda x: '{0:0>13}'.format(x))
+			self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].apply(lambda x: x.split('.')[0])
+			self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].astype(str)
+			self.df_inq.drop_duplicates(subset=['docId'], inplace=True)
+		# df_inq.to_excel("test_inq_all.xlsx", index=False)
+		except KeyError as e:
+			print(f'KeyError: user did not select file: {e}' )
+			messagebox.showerror('Error', f'File is not Etax Inquiry\n{e}')
+			if 'ok':
+				self.listbox_inq.delete(0, END)		
+		except Exception as e:
+			print(f'Exception error: {e}')
+
+		# if inq box cash journal is not emtry (have data), browse button will be disable.
+		if self.listbox_inq.get(0, END) != ():
+			self.inq_btn['state'] = 'disabled'
+			self.var_inq_btn = True
+			self.switch()
+						
+	def switch(self):
+		if self.var_cash_btn and self.var_inq_btn:
+			self.merge_btn['state'] = 'normal'
 			self.var_cash_btn = False
 			self.var_inq_btn = False
+				
+	def merge_data(self):			
+		self.df_result = pd.merge(self.df_cash, self.df_inq, how='left', left_on='Receipt No', right_on='docId')
+		self.df_result.drop(columns='docId', inplace=True)			
+		self.df_result.rename(columns={
+			'Bank\nAccount' : 'Bank',
+			'Receipt\nCust Name' : 'Receipt Name',
+			'Total Receipt\nAmount	' : 'Receipt Amount',
+			'Receipt\nApply AMT': 'WHT Amount',
+			}, inplace=True)
 
-		def browse_cash(self):			
-			filetypes = [('Excel files', '.xlsx')]
-			self.cash_path = filedialog.askopenfilenames(title='Choose files', filetypes=filetypes)
+		self.df_result['Receipt Date'] = pd.to_datetime(self.df_result['Receipt Date'], format='%Y-%m-%d')
+		self.df_result['WHT Amount'] = self.df_result['WHT Amount'].astype(float)
+		
+		self.frame.pack_forget()
+		app_wht.draw()
 
-			self.df_cash = pd.DataFrame()
+	def draw(self):
+		self.frame.pack(fill='both', expand=True)
+		# grid_row/columnconfigure --> give ability to resize widget with position the same position button
+		#(first arg is highest number of row and column)
+		self.frame.grid_rowconfigure(3, weight=1)
+		self.frame.grid_columnconfigure(2, weight=1)
 
-			for i in self.cash_path:
-				self.cash_dir, self.cash_basename = os.path.split(i)
-				self.listbox_journal.insert(END, self.cash_basename)
-				# ETL by using Pandas
-				for f in glob.glob(i):
-					try:
-						csh_chq = pd.read_excel(f, sheet_name='Report WHT Cash & CHQ')
-						tfr = pd.read_excel(f, sheet_name='WHT TRF (HSBC&BAY)')
-						e_payment = pd.read_excel(f, sheet_name='WHT TRF (e-payment)')
-						df_concat = pd.concat([csh_chq, tfr, e_payment], ignore_index=True)
-						self.df_cash = pd.concat([self.df_cash, df_concat], ignore_index=True)
-					except ValueError as e:
-						print(f'ValueError: file is not cash journal: {e}')
-						messagebox.showerror('Error', f'File is not Cash Journal\n{e}')
-						if 'ok':
-							self.listbox_journal.delete(0,END)			
-			try:
-				# dropna on columns WHT
-				self.df_cash.dropna(subset=['Unnamed: 10'], inplace=True)			
-				# delete unnesscesary columns
-				self.df_cash = self.df_cash.drop(self.df_cash.columns[12:], axis=1)
-				# make row 1 to be header
-				self.df_cash.columns = self.df_cash.iloc[0]
-				self.df_cash = self.df_cash[1:]
-				# delete unwanted row
-				filt = (self.df_cash['Receipt Date'] == 'Receipt Date')
-				self.df_cash = self.df_cash.drop(index=self.df_cash[filt].index)
-				self.df_cash['Receipt Date'] = pd.to_datetime(self.df_cash['Receipt Date'], format='%Y-%m-%d')
-				self.df_cash['Receipt\nApply AMT'] = self.df_cash['Receipt\nApply AMT'].astype(float)
-				# df.to_excel('test.xlsx', index=False)
-			except KeyError as e:
-				print(f'KeyError: user did not select any file: {e}')
-			except ValueError as e:
-				print(f'ValueError: file is not cash journal: {e}')
-				messagebox.showerror('Error', 'File is not Cash Journal')
-			except Exception as e:
-				print(f'Exception: error: {e}')
+		self.journal_btn.grid(row=0, column=0,pady=30, padx=60, sticky=W)
+		self.listbox_journal.grid(row=1, column=0, padx=50, sticky=NW)
+		self.inq_btn.grid(row=0, column=1, pady=30, padx=45, sticky=W)
+		self.listbox_inq.grid(row=1, column=1,padx=40, sticky=NW)
+		self.clear_btn.grid(row=0, column=2, pady=30,padx=35, sticky=W)
+		self.merge_btn.grid(row=1, column=2, padx=35, sticky=W)
+		self.dev.grid(row=3, column=0, pady=50, padx=30, sticky=SW)
 
-			# if listbox cash journal is not emtry (have data), browse button will be disable.
-			if self.listbox_journal.get(0, END) != ():
-				self.journal_btn['state'] = 'disabled'
-				self.var_cash_btn = True
-				self.switch()
-												
-		def browse_inq(self):
-			filetypes = [('Excel files', '.xlsx')]
-			
-			self.inq_path = filedialog.askopenfilenames(title='Choose files', filetypes=filetypes)
-
-			self.df_inq = pd.DataFrame()
-
-			for i in self.inq_path:
-				self.inq_dir, self.inq_basename = os.path.split(i)
-				self.listbox_inq.insert(END, self.inq_basename)
-				for f in glob.glob(i):
-					read_inq = pd.read_excel(f, engine='openpyxl')
-					self.df_inq = pd.concat([self.df_inq, read_inq], ignore_index=True)
-			try:
-				pd.set_option('display.float_format', '{:.0f}'.format)
-				self.df_inq = self.df_inq[['docId', 'taxIDBR']]			
-				self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].apply(lambda x: '{0:0>13}'.format(x))
-				self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].apply(lambda x: x.split('.')[0])
-				self.df_inq['taxIDBR'] = self.df_inq['taxIDBR'].astype(str)
-				self.df_inq.drop_duplicates(subset=['docId'], inplace=True)
-			# df_inq.to_excel("test_inq_all.xlsx", index=False)
-			except KeyError as e:
-				print(f'KeyError: user did not select file: {e}' )
-				messagebox.showerror('Error', f'File is not Etax Inquiry\n{e}')
-				if 'ok':
-					self.listbox_inq.delete(0, END)		
-			except Exception as e:
-				print(f'Exception error: {e}')
-
-			# if inq box cash journal is not emtry (have data), browse button will be disable.
-			if self.listbox_inq.get(0, END) != ():
-				self.inq_btn['state'] = 'disabled'
-				self.var_inq_btn = True
-				self.switch()
-							
-		def switch(self):
-			if self.var_cash_btn and self.var_inq_btn:
-				self.merge_btn['state'] = 'normal'
-				self.var_cash_btn = False
-				self.var_inq_btn = False
-					
-		def merge_data(self):			
-			self.df_result = pd.merge(self.df_cash, self.df_inq, how='left', left_on='Receipt No', right_on='docId')
-			self.df_result.drop(columns='docId', inplace=True)			
-			self.df_result.rename(columns={
-				'Bank\nAccount' : 'Bank',
-				'Receipt\nCust Name' : 'Receipt Name',
-				'Total Receipt\nAmount	' : 'Receipt Amount',
-				'Receipt\nApply AMT': 'WHT Amount',
-				}, inplace=True)
-
-			self.df_result['Receipt Date'] = pd.to_datetime(self.df_result['Receipt Date'], format='%Y-%m-%d')
-			self.df_result['WHT Amount'] = self.df_result['WHT Amount'].astype(float)
-			
-			self.frame.pack_forget()
-			app_wht.draw()
-
-		def draw(self):
-			self.frame.pack(fill='both', expand=True)
-			# grid_row/columnconfigure --> give ability to resize widget with position the same position button
-			#(first arg is highest number of row and column)
-			self.frame.grid_rowconfigure(3, weight=1)
-			self.frame.grid_columnconfigure(2, weight=1)
-
-			self.journal_btn.grid(row=0, column=0,pady=30, padx=60, sticky=W)
-			self.listbox_journal.grid(row=1, column=0, padx=50, sticky=NW)
-			self.inq_btn.grid(row=0, column=1, pady=30, padx=45, sticky=W)
-			self.listbox_inq.grid(row=1, column=1,padx=40, sticky=NW)
-			self.clear_btn.grid(row=0, column=2, pady=30,padx=35, sticky=W)
-			self.merge_btn.grid(row=1, column=2, padx=35, sticky=W)
-			self.dev.grid(row=3, column=0, pady=50, padx=30, sticky=SW)
-
-		def clear(self):
-			# clear all listbox item
-			self.listbox_journal.delete(0, END)
-			self.listbox_inq.delete(0, END)
-			# grab all df and delete then set to emtry dataframe, delete all garbage collect
-			try:
-				del [[self.df_cash, self.df_inq]]
-				gc.collect()
-				self.df_cash = pd.DataFrame()
-				self.df_inq = pd.DataFrame()
-			except AttributeError as e:
-				print(f'dataframe is not exist : {e}')
-			
-			self.journal_btn['state'] = 'normal'
-			self.inq_btn['state'] = 'normal'
-			self.merge_btn['state'] = 'disabled'
-
-		def drop_df_result(self):
-			del self.df_result
+	def clear(self):
+		# clear all listbox item
+		self.listbox_journal.delete(0, END)
+		self.listbox_inq.delete(0, END)
+		# grab all df and delete then set to emtry dataframe, delete all garbage collect
+		try:
+			del [[self.df_cash, self.df_inq]]
 			gc.collect()
+			self.df_cash = pd.DataFrame()
+			self.df_inq = pd.DataFrame()
+		except AttributeError as e:
+			print(f'dataframe is not exist : {e}')
+		
+		self.journal_btn['state'] = 'normal'
+		self.inq_btn['state'] = 'normal'
+		self.merge_btn['state'] = 'disabled'
+
+	def drop_df_result(self):
+		del self.df_result
+		gc.collect()
 		
 
 class App_WHT:
