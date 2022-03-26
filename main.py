@@ -4,15 +4,18 @@ from tkinter import filedialog, messagebox, simpledialog,ttk
 import pandas as pd
 import os, glob, gc, warnings
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
 # connect to GSheet API
-scope = ['https://spreadsheets.google.com/feeds',
-		'https://www.googleapis.com/auth/drive']
+scopes = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive']
 
-creds = ServiceAccountCredentials.from_json_keyfile_name('keys_drive.json', scope)
-gs = gspread.authorize(creds)
-sheet = gs.open('testAPI').sheet1
+credentials = Credentials.from_service_account_file('keys_drive.json',scopes=scopes)
+gc = gspread.authorize(credentials)
+
+sh = gc.open('testAPI')
+worksheet = sh.sheet1
 
 root = Tk()
 root.geometry('800x600+1800+100')
@@ -176,9 +179,9 @@ class App_Inquiry:
 		self.inq_btn['state'] = 'normal'
 		self.merge_btn['state'] = 'disabled'
 
-	def drop_df_result(self):
-		del self.df_result
-		gc.collect()
+	# def drop_df_result(self):
+	# 	del self.df_result
+	# 	gc.collect()
 		
 
 class App_WHT:
@@ -194,6 +197,11 @@ class App_WHT:
 		self.filemenu.add_command(label='Exit', command=root.quit)
 		self.menubar.add_cascade(label='File', menu=self.filemenu)
 
+		self.database_menu = Menu(self.menubar, tearoff=0)
+		self.database_menu.add_command(label='Download from database', command=self.download_database)
+		self.database_menu.add_command(label='Check With Cash Journal', command=self.check)
+		self.database_menu.add_command(label='Pending from Cash Journal', command=self.pending)
+		self.menubar.add_cascade(label='Query from Database', menu=self.database_menu)
 		
 		self.y_scrollbar = Scrollbar(self.frame)
 		self.tree_view = ttk.Treeview(self.frame, height=20, selectmode='extended', yscrollcommand=self.y_scrollbar.set)
@@ -400,6 +408,7 @@ class App_WHT:
 			try:
 				self.record()
 				messagebox.showinfo(title='Save to Database', message='Save Successful')
+				self.clear()
 			except Exception as e:
 				print(e)
 				messagebox.showerror(title='Error', message=e)
@@ -411,6 +420,9 @@ class App_WHT:
 			adjust = simpledialog.askfloat(title='Adjust', prompt='Amount to adjust\n\nIf no adjust, type 0.00')
 			if adjust != None:
 				confirm = messagebox.askyesno(title='Save to Database', message=f'Are you sure to save to Database?\n\nRemark : {remark}\nadjust : {adjust}')
+				if confirm:
+					messagebox.showinfo(title='Save to Database', message='Save Successful')					
+					
 		# make pandas dataframe for those remark
 		list_remark = []
 		list_remark.append(remark)
@@ -435,12 +447,12 @@ class App_WHT:
 		df_concat = pd.concat([df, df_rm], axis=1)
 		# send dataframe to API
 		try:
-			sheet.append_rows([df_concat.columns.values.tolist()] + df_concat.values.tolist(), value_input_option="USER_ENTERED")		
+			worksheet.append_rows([df_concat.columns.values.tolist()] + df_concat.values.tolist(), value_input_option="USER_ENTERED")		
 		except Exception as e:
 			print(e)
 			messagebox.showerror(title='API Error', message='Please select one receipt for remark')
 							
-	def record(self):		
+	def record(self):
 		data_list = []
 		for item in self.tree_view.selection():
 			item_text = self.tree_view.item(item, 'values')		
@@ -450,7 +462,44 @@ class App_WHT:
 		df.columns = df.iloc[0]
 		df.drop(index=0, inplace=True)
 		
-		sheet.append_rows([df.columns.values.tolist()] + df.values.tolist() , value_input_option="USER_ENTERED")
+		worksheet.append_rows([df.columns.values.tolist()] + df.values.tolist() , value_input_option="USER_ENTERED")
+
+	def gdata(self):
+		get_gsheet = worksheet.get_all_values()
+		self.df = pd.DataFrame(get_gsheet)
+		self.df.columns = self.df.iloc[0]
+		self.df.drop(index=0, inplace=True)
+		self.df['WHT'] = self.df['WHT'].astype(float)
+		self.df['Date'] = self.df['Date'].apply(lambda x: x.split(' ')[0])
+		self.df['Date'] = pd.to_datetime(self.df['Date'], format= '%Y-%m-%d')
+		
+	def download_database(self):
+		self.gdata()				
+		filetypes = [('excel', '*.xlsx')]
+
+		path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='database_file')
+		self.df.to_excel(path, index=False)
+
+	def check(self):
+		self.gdata()
+		# merge Cash Journal with Gsheet, return only matching Receipt No (INNER JOIN)
+		df_merge = pd.merge(app_inquiry.df_result, self.df, left_on=['Receipt No'], right_on=['Receipt'])
+
+		df_result_row = app_inquiry.df_result.shape[0]
+		per_complete = f'{((df_merge.shape[0]/df_result_row)*100):.2f}%'
+		
+		messagebox.showinfo(title='% Complete', message=f'{per_complete} received WHT')
+
+	def pending(self):
+		self.gdata()
+		df_pending = pd.merge(app_inquiry.df_result, self.df, left_on='Receipt No', right_on='Receipt',how='outer', indicator=True)
+		df_pending = df_pending[df_pending['_merge']=='left_only']
+
+		filetypes = [('excel', '*.xlsx')]
+
+		path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='pending WHT')
+		df_pending.to_excel(path, index=False)
+		print(df_pending.shape)
 		
 def main():		
 	app_inquiry.draw()
