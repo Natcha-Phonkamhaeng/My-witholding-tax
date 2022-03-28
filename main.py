@@ -2,9 +2,11 @@
 from tkinter import *
 from tkinter import filedialog, messagebox, simpledialog,ttk
 import pandas as pd
+from matplotlib import pyplot as plt
 import os, glob, gc, warnings
 import gspread
 from google.oauth2.service_account import Credentials
+
 
 # connect to GSheet API
 scopes = [
@@ -12,9 +14,9 @@ scopes = [
     'https://www.googleapis.com/auth/drive']
 
 credentials = Credentials.from_service_account_file('keys_drive.json',scopes=scopes)
-gc = gspread.authorize(credentials)
+gs = gspread.authorize(credentials)
 
-sh = gc.open('testAPI')
+sh = gs.open('testAPI')
 worksheet = sh.sheet1
 
 root = Tk()
@@ -230,9 +232,13 @@ class App_WHT:
 
 	def download(self):
 		filetypes = [('excel', '*.xlsx')]
-
-		wht_data = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='wht_data')
-		app_inquiry.df_result.to_excel(wht_data, index=False)
+		try:
+			wht_data = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='wht_data')
+			app_inquiry.df_result.to_excel(wht_data, index=False)
+		except ValueError as e:
+			print(f'ValueError: did not select file : {e}')
+		except Exception as e:
+			print(f'Exception Error: {e}')
 
 	def ttk_style(self, fbg):
 		treeview_style = ttk.Style()
@@ -476,9 +482,13 @@ class App_WHT:
 	def download_database(self):
 		self.gdata()				
 		filetypes = [('excel', '*.xlsx')]
-
-		path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='database_file')
-		self.df.to_excel(path, index=False)
+		try:
+			path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='database_file')
+			self.df.to_excel(path, index=False)
+		except ValueError as e:
+			print(f'Value Error: did not select file {e}')
+		except Exception as e:
+			print(f'Exception Error: {e}')
 
 	def check(self):
 		self.gdata()
@@ -486,9 +496,21 @@ class App_WHT:
 		df_merge = pd.merge(app_inquiry.df_result, self.df, left_on=['Receipt No'], right_on=['Receipt'])
 
 		df_result_row = app_inquiry.df_result.shape[0]
-		per_complete = f'{((df_merge.shape[0]/df_result_row)*100):.2f}%'
-		
-		messagebox.showinfo(title='% Complete', message=f'{per_complete} received WHT')
+		df_merge_row = df_merge.shape[0]
+		# per_complete = f'{((df_merge.shape[0]/df_result_row)*100):.2f}%'
+
+		# using Matplotlib Piechart
+		plt.style.use('fivethirtyeight')
+		slices = [df_merge_row, df_result_row]
+		labels = ['Received WHT', 'Cash Journal']
+		colors = ['Green', 'Red']
+		plt.pie(slices, labels=labels, colors=colors, startangle=90, autopct='%.2f%%',
+				 wedgeprops={'edgecolor': 'black'})
+
+		plt.title('Percent of complete')
+		plt.tight_layout()
+		plt.legend(loc='upper right', bbox_to_anchor=(1.23, 1), prop={'size': 9})
+		plt.show()
 
 	def pending(self):
 		self.gdata()
@@ -496,11 +518,14 @@ class App_WHT:
 		df_pending = df_pending[df_pending['_merge']=='left_only']
 
 		filetypes = [('excel', '*.xlsx')]
-
-		path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='pending WHT')
-		df_pending.to_excel(path, index=False)
-		print(df_pending.shape)
-		
+		try:
+			path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes, initialfile='pending WHT')
+			df_pending.to_excel(path, index=False)
+		except ValueError as e:
+			print(f'ValueError: did not select file : {e}')
+		except Exception as e:
+			print(f'ExceptionError: {e}')
+				
 def main():		
 	app_inquiry.draw()
 
